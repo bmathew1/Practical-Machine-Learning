@@ -1,0 +1,144 @@
+---
+title: "Practical Machine Learning - Peer-graded Assignment"
+author: "Benil Mathew"
+date: "14 October 2016"
+output: html_document
+---
+
+This R markdown is the peer-graded assignment of the practical machine learning Coursera course which is part of the Data Science specialisation. The expected outcome of the assignment is to build a model to predict the manner in which users of wearable devices such as Jawbone Up, Nike FuelBand, and Fitbit did their exercise. More information is available from the website [here](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset). Training data cane be found [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and test data [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+The variable to be predicted is respresented by feature name `classe` in the training set. This report also covers the outcome of using the prediction model to predict `classe` for 20 records in the testing set.
+
+###Load libraries  
+
+```{r warning=FALSE, message=FALSE}
+library(caret); library(randomForest)
+```
+
+
+###Load training and test data  
+
+```{r}
+path=paste0(getwd(), '/../')
+train_data <- read.csv(paste0(path, 'pml-training.csv'), na.strings=c("NA","#DIV/0!",""))
+test_data <- read.csv(paste0(path, 'pml-testing.csv'), na.strings=c("NA","#DIV/0!",""))
+```
+
+Note - '#DIV/0!' values in some rows are converted to NA while loading.   
+
+Training data has `r dim(train_data)[1]` rows and `r dim(train_data)[2]` coloumns.   
+Test data has `r dim(test_data)[1]` rows and `r dim(test_data)[2]` coloumns.     
+
+Unique records in the `classe` column of training data, that will be predicted, is shown by using the code below.   
+```{r}
+unique(train_data$classe)
+```
+
+Checking for imbalance in the number of records in different classes.   
+```{r fig.width=5, fig.height=5}
+ggplot(data=train_data, aes(classe)) + geom_bar(aes(fill=classe))
+```
+
+Proportion of records for class 'A' appear to be high. Leaving this as is for now with a view to revisintg if the model does not perform well.  
+
+##Remove unnecessary features  
+Following varibales ``r colnames(train_data)[1:6]`` do not seem to have sufficient predicting power, based on what it seem to represent.   
+
+Feature ``r colnames(train_data[1])`` appear to be an id field, as there are unique values for each row.
+
+```{r}
+length(unique(train_data$X)) == dim(train_data)[1]
+```
+
+Feature ``r colnames(train_data)[6]`` appear to be a boolean value, which is assumed to be not useful.
+
+```{r}
+unique(train_data$new_window)
+```
+
+Removing the fields mentioned about from training and testing data sets  
+```{r}
+train_data <- train_data[,-c(1:6)]
+test_data <- test_data[,-c(1:6)]
+```
+
+Feature `num_window` deos not appear to be a relevant variable. Checking how it is distributed across the different classes
+
+```{r fig.width=5, fig.height=5}
+ggplot(data=train_data, aes(classe, num_window)) + 
+    geom_boxplot(aes(fill=classe)) + 
+    geom_point(data=train_data, aes(classe, num_window), 
+               position=position_dodge(width=0.5)) 
+```
+
+No clear indications to determine anything from the plot. Leaving it in for now.   
+
+`problem_id` field in test data appear to be a record id, as it has unique values for each row.
+
+```{r}
+length(unique(test_data$problem_id))
+```
+
+Removing all columns with NA from train and test sets along with `problem_id` from testing set.   
+
+```{r}
+naCols <- colnames(train_data[,colSums(is.na(train_data)) != 0])
+train_data <- train_data[,!(colnames(train_data) %in% naCols)]
+test_data <- test_data[,!(colnames(test_data) %in% naCols)]
+test_data <- test_data[,!(names(test_data)=="problem_id")]
+```
+
+###Partition train_data into training set and evaluation set
+
+```{r}
+#set.seed(7826) 
+set.seed(71421) 
+trn_idx <- createDataPartition(train_data$classe, p = 0.7, list = FALSE)
+trn_set <- train_data[trn_idx, ]
+eval_set <- train_data[-trn_idx, ]
+```
+
+Training set has `r dim(trn_set)[1]` rows and `r dim(trn_set)[2]` coloumns   
+Evaluation set has `r dim(eval_set)[1]` rows and `r dim(eval_set)[2]` coloumns  
+
+###Train the model
+
+```{r}
+nFolds = 5
+control <- trainControl(method = "cv", number = nFolds)
+fit <- train(classe ~ ., data = trn_set, method = "rf", 
+                   trControl = control, ntree=5)
+print(fit, digits = 4)
+```
+
+Training is done using randomforest algorithm with train function in caret package. It uses `r nFolds` fold cross validation, passed in through `trainControl`.   
+
+Choice of randomforest is due to familiarity of the author in using the algorithm and its good performance that has been observed.
+
+###Scoring the model on evaluation set
+
+```{r}
+predictions <- predict(fit, eval_set)
+# Show prediction result
+cMatrix <- confusionMatrix(eval_set$classe, predictions)
+print(cMatrix)
+```
+
+The model has score of `r cMatrix$overall[1]`  
+
+One observation from the confusion matrix is that the true values (values in diagonal) for each class appear to be correlated to the number of records for each class in the training set. Balancnig the records in the training set may allow for changes to this.   
+
+Code below shows the proportin of records in each class in the training set and the true values in the confusion matrix.   
+```{r}
+sprintf("%.2f%%", prop.table(table(trn_set$classe)) * 100)
+sprintf("%.2f%%", (diag(cMatrix$table) / sum(diag(cMatrix$table))) * 100)
+```
+
+###Predicting classe for test set
+
+```{r}
+predict(fit, test_data)
+```
+
+Given a score of `r cMatrix$overall[1]` on the evaluation and a perfect score on prediction of test data (based on submission result of the quiz) there does not appear to be overfitting nor a need to make any changes to the features or the model. For the same reason no attempts to balance the training set is made here.  
+
